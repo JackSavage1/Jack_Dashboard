@@ -1,6 +1,4 @@
-# Streamlit Dashboard
-
-This project is a Streamlit dashboard.
+#
 
 ## Getting Started
 
