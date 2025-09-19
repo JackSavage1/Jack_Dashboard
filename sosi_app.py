@@ -177,151 +177,179 @@ with tab1:
 with tab2:
     st.subheader("📈 Trends Analysis")
     
-    # Check if historical data is available
-    if local_data.get('historical') and isinstance(local_data['historical'], dict):
-        # Get the main historical data sheet
-        hist_data = local_data['historical'].get('All Historical Data')
-        
-        if hist_data is not None and not hist_data.empty:
-            # Convert date columns to datetime
-            date_columns = ['Request Date', 'Hearing Date', 'Row Added']
-            for col in date_columns:
-                if col in hist_data.columns:
-                    hist_data[col] = pd.to_datetime(hist_data[col], errors='coerce')
+    try:
+        # Check if historical data is available
+        if local_data.get('historical') and isinstance(local_data['historical'], dict):
+            # Get the main historical data sheet
+            hist_data = local_data['historical'].get('All Historical Data')
             
-            # Time range filter
-            st.markdown("### ⏰ Select Time Range")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if 'Request Date' in hist_data.columns:
+            if hist_data is not None and not hist_data.empty:
+                # Convert date columns to datetime
+                date_columns = ['Request Date', 'Hearing Date', 'Row Added']
+                for col in date_columns:
+                    if col in hist_data.columns:
+                        hist_data[col] = pd.to_datetime(hist_data[col], errors='coerce')
+                
+                # Check if we have valid dates
+                if 'Request Date' in hist_data.columns and not hist_data['Request Date'].isna().all():
+                    # Time range filter
+                    st.markdown("### ⏰ Select Time Range")
+                    col1, col2 = st.columns(2)
+                    
+                    # Get date range
                     min_date = hist_data['Request Date'].min()
                     max_date = hist_data['Request Date'].max()
                     
-                    if pd.notna(min_date) and pd.notna(max_date):
-                        start_date = st.date_input(
-                            "Start Date",
-                            value=max_date - timedelta(days=365),
-                            min_value=min_date.date(),
-                            max_value=max_date.date()
-                        )
-                    else:
-                        start_date = st.date_input("Start Date")
-            
-            with col2:
-                if 'Request Date' in hist_data.columns and pd.notna(max_date):
-                    end_date = st.date_input(
-                        "End Date",
-                        value=max_date.date(),
-                        min_value=min_date.date() if pd.notna(min_date) else None,
-                        max_value=max_date.date()
-                    )
+                    with col1:
+                        if pd.notna(min_date) and pd.notna(max_date):
+                            # Calculate safe default start date
+                            try:
+                                default_start = max(min_date, max_date - timedelta(days=365))
+                                start_date = st.date_input(
+                                    "Start Date",
+                                    value=default_start.date(),
+                                    min_value=min_date.date(),
+                                    max_value=max_date.date()
+                                )
+                            except:
+                                start_date = st.date_input("Start Date", value=min_date.date())
+                        else:
+                            start_date = st.date_input("Start Date")
+                    
+                    with col2:
+                        if pd.notna(max_date):
+                            try:
+                                end_date = st.date_input(
+                                    "End Date",
+                                    value=max_date.date(),
+                                    min_value=min_date.date() if pd.notna(min_date) else None,
+                                    max_value=max_date.date()
+                                )
+                            except:
+                                end_date = st.date_input("End Date", value=max_date.date())
+                        else:
+                            end_date = st.date_input("End Date")
+                    
+                    # Filter data by date range
+                    try:
+                        mask = (hist_data['Request Date'].dt.date >= start_date) & (hist_data['Request Date'].dt.date <= end_date)
+                        filtered_hist = hist_data[mask].copy()
+                    except:
+                        filtered_hist = hist_data.copy()
+                    
+                    # Trend visualizations
+                    st.markdown("---")
+                    
+                    # Requests over time
+                    if not filtered_hist.empty and 'Request Date' in filtered_hist.columns:
+                        st.markdown("### 📊 Service Requests Over Time")
+                        
+                        try:
+                            # Group by month
+                            monthly_requests = filtered_hist.groupby(filtered_hist['Request Date'].dt.to_period('M')).size()
+                            monthly_requests.index = monthly_requests.index.to_timestamp()
+                            
+                            fig_trend = px.line(
+                                x=monthly_requests.index,
+                                y=monthly_requests.values,
+                                title="Monthly Service Requests",
+                                labels={'x': 'Month', 'y': 'Number of Requests'}
+                            )
+                            fig_trend.update_traces(mode='lines+markers')
+                            st.plotly_chart(fig_trend, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error creating time series chart: {str(e)}")
+                    
+                    # Language trends
+                    if not filtered_hist.empty and 'Language' in filtered_hist.columns:
+                        st.markdown("### 🌍 Language Request Trends")
+                        
+                        try:
+                            # Top languages over time
+                            top_languages = filtered_hist['Language'].value_counts().head(5).index
+                            lang_trend_data = []
+                            
+                            for lang in top_languages:
+                                lang_data = filtered_hist[filtered_hist['Language'] == lang]
+                                monthly = lang_data.groupby(lang_data['Request Date'].dt.to_period('M')).size()
+                                monthly.index = monthly.index.to_timestamp()
+                                
+                                for date, count in monthly.items():
+                                    lang_trend_data.append({
+                                        'Date': date,
+                                        'Language': lang,
+                                        'Count': count
+                                    })
+                            
+                            if lang_trend_data:
+                                lang_trend_df = pd.DataFrame(lang_trend_data)
+                                
+                                fig_lang_trend = px.line(
+                                    lang_trend_df,
+                                    x='Date',
+                                    y='Count',
+                                    color='Language',
+                                    title="Top 5 Languages - Request Trends",
+                                    labels={'Count': 'Number of Requests', 'Date': 'Month'}
+                                )
+                                st.plotly_chart(fig_lang_trend, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error creating language trends chart: {str(e)}")
+                    
+                    # Linguist availability trends
+                    if not filtered_hist.empty and 'Has Linguist?' in filtered_hist.columns:
+                        st.markdown("### 👥 Linguist Availability Trends")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            try:
+                                # Overall availability
+                                availability_counts = filtered_hist['Has Linguist?'].value_counts()
+                                
+                                fig_avail = px.pie(
+                                    values=availability_counts.values,
+                                    names=availability_counts.index,
+                                    title="Overall Linguist Availability",
+                                    color_discrete_map={'Yes': '#2E7D32', 'No': '#D32F2F'}
+                                )
+                                st.plotly_chart(fig_avail, use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Error creating availability chart: {str(e)}")
+                        
+                        with col2:
+                            try:
+                                # Availability by language
+                                if 'Language' in filtered_hist.columns:
+                                    lang_avail = filtered_hist.groupby(['Language', 'Has Linguist?']).size().unstack(fill_value=0)
+                                    lang_avail['Total'] = lang_avail.sum(axis=1)
+                                    lang_avail['Availability %'] = (lang_avail.get('Yes', 0) / lang_avail['Total'] * 100).round(1)
+                                    
+                                    top_lang_avail = lang_avail.nlargest(10, 'Total')
+                                    
+                                    fig_lang_avail = px.bar(
+                                        x=top_lang_avail.index,
+                                        y=top_lang_avail['Availability %'],
+                                        title="Linguist Availability by Top 10 Languages",
+                                        labels={'x': 'Language', 'y': 'Availability %'},
+                                        color=top_lang_avail['Availability %'],
+                                        color_continuous_scale='RdYlGn'
+                                    )
+                                    fig_lang_avail.add_hline(y=50, line_dash="dash", annotation_text="50% threshold")
+                                    st.plotly_chart(fig_lang_avail, use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Error creating language availability chart: {str(e)}")
                 else:
-                    end_date = st.date_input("End Date")
-            
-            # Filter data by date range
-            if 'Request Date' in hist_data.columns:
-                mask = (hist_data['Request Date'].dt.date >= start_date) & (hist_data['Request Date'].dt.date <= end_date)
-                filtered_hist = hist_data[mask].copy()
+                    st.warning("No valid request dates found in the historical data.")
             else:
-                filtered_hist = hist_data.copy()
-            
-            # Trend visualizations
-            st.markdown("---")
-            
-            # Requests over time
-            if 'Request Date' in filtered_hist.columns:
-                st.markdown("### 📊 Service Requests Over Time")
-                
-                # Group by month
-                monthly_requests = filtered_hist.groupby(filtered_hist['Request Date'].dt.to_period('M')).size()
-                monthly_requests.index = monthly_requests.index.to_timestamp()
-                
-                fig_trend = px.line(
-                    x=monthly_requests.index,
-                    y=monthly_requests.values,
-                    title="Monthly Service Requests",
-                    labels={'x': 'Month', 'y': 'Number of Requests'}
-                )
-                fig_trend.update_traces(mode='lines+markers')
-                st.plotly_chart(fig_trend, use_container_width=True)
-            
-            # Language trends
-            if 'Language' in filtered_hist.columns and 'Request Date' in filtered_hist.columns:
-                st.markdown("### 🌍 Language Request Trends")
-                
-                # Top languages over time
-                top_languages = filtered_hist['Language'].value_counts().head(5).index
-                lang_trend_data = []
-                
-                for lang in top_languages:
-                    lang_data = filtered_hist[filtered_hist['Language'] == lang]
-                    monthly = lang_data.groupby(lang_data['Request Date'].dt.to_period('M')).size()
-                    monthly.index = monthly.index.to_timestamp()
-                    
-                    for date, count in monthly.items():
-                        lang_trend_data.append({
-                            'Date': date,
-                            'Language': lang,
-                            'Count': count
-                        })
-                
-                if lang_trend_data:
-                    lang_trend_df = pd.DataFrame(lang_trend_data)
-                    
-                    fig_lang_trend = px.line(
-                        lang_trend_df,
-                        x='Date',
-                        y='Count',
-                        color='Language',
-                        title="Top 5 Languages - Request Trends",
-                        labels={'Count': 'Number of Requests', 'Date': 'Month'}
-                    )
-                    st.plotly_chart(fig_lang_trend, use_container_width=True)
-            
-            # Linguist availability trends
-            if 'Has Linguist?' in filtered_hist.columns:
-                st.markdown("### 👥 Linguist Availability Trends")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Overall availability
-                    availability_counts = filtered_hist['Has Linguist?'].value_counts()
-                    
-                    fig_avail = px.pie(
-                        values=availability_counts.values,
-                        names=availability_counts.index,
-                        title="Overall Linguist Availability",
-                        color_discrete_map={'Yes': '#2E7D32', 'No': '#D32F2F'}
-                    )
-                    st.plotly_chart(fig_avail, use_container_width=True)
-                
-                with col2:
-                    # Availability by language
-                    if 'Language' in filtered_hist.columns:
-                        lang_avail = filtered_hist.groupby(['Language', 'Has Linguist?']).size().unstack(fill_value=0)
-                        lang_avail['Total'] = lang_avail.sum(axis=1)
-                        lang_avail['Availability %'] = (lang_avail.get('Yes', 0) / lang_avail['Total'] * 100).round(1)
-                        
-                        top_lang_avail = lang_avail.nlargest(10, 'Total')
-                        
-                        fig_lang_avail = px.bar(
-                            x=top_lang_avail.index,
-                            y=top_lang_avail['Availability %'],
-                            title="Linguist Availability by Top 10 Languages",
-                            labels={'x': 'Language', 'y': 'Availability %'},
-                            color=top_lang_avail['Availability %'],
-                            color_continuous_scale='RdYlGn'
-                        )
-                        fig_lang_avail.add_hline(y=50, line_dash="dash", annotation_text="50% threshold")
-                        st.plotly_chart(fig_lang_avail, use_container_width=True)
-            
+                st.warning("No historical data available for trends analysis.")
         else:
-            st.warning("No historical data available for trends analysis.")
-    else:
-        st.warning("Historical data file not found. Please ensure 'AllDataAnalysis_20250908_194306.xlsx' is in the same directory as the app.")
-        st.info("Expected file: AllDataAnalysis_20250908_194306.xlsx")
+            st.warning("Historical data file not found. Please ensure 'AllDataAnalysis_20250908_194306.xlsx' is in the same directory as the app.")
+            st.info("Expected file: AllDataAnalysis_20250908_194306.xlsx")
+    
+    except Exception as e:
+        st.error("An error occurred while loading trends data. Please check your data files.")
+        st.info(f"Error details: {str(e)}")
 
 # Tab 3: Linguist Directory
 with tab3:
